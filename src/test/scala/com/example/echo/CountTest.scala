@@ -10,10 +10,12 @@ import cats.effect._
 import org.http4s.dsl._
 import org.http4s._
 import org.http4s.implicits._
+import cats.effect.concurrent.Ref
 
 class CountTest extends AnyFlatSpec {
 
-  val route = Routes.route[IO].orNotFound
+  val ref = Ref.of[IO, Map[String, Int]](Map[String, Int]()).unsafeRunSync()
+  val route = Routes.route[IO](ref).orNotFound
 
   behavior of "route"
 
