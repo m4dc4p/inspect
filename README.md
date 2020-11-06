@@ -1,4 +1,4 @@
-# Setup
+# Setup (Scal)
 
 To run this application, make sure you have Java installed (at least JDK 1.8/Java 8).
 
@@ -26,3 +26,10 @@ sbt> run
 23:32:25.938 [ioapp-compute-0] INFO org.http4s.server.blaze.BlazeServerBuilder - http4s v1.0.0-M5 on blaze v0.14.13 started at http://[::]:9000/
 ```
 
+# Setup (Haskell)
+
+Use cabal to run the sample application:
+
+```bash
+$ cabal run
+```
