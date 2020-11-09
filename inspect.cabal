@@ -5,6 +5,7 @@ build-type:          Simple
 
 executable inspect
   main-is:             Main.hs
+  other-modules:       User
   build-depends:       base >= 4.6 && < 5,
                        base-compat >= 0.11 && < 0.12,
                        data-default-class,

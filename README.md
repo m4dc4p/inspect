@@ -97,3 +97,94 @@ not be acceptable. If writes cannot be lost, NoSQL may not be the best solution.
 
 If the workload was expected to be write & ready heavy, I would likely reach for Redis. As Redis natively supports the ability to increment a count associated with
 a key, it would solve our problem immediately. I don't have operational experience with Redis, and would need to ensure it could provide the performance required.
+
+# Type-based RBAC
+
+The core idea is that certain fields are secret, and should only be visible to certain roles. In my example, each `User` has a favorite color that
+only the admin can read or update. I also like using the same structure for insert, read, and update, so the `User` data type 
+is parameterized on each field. From `User.hs`:
+
+```hs
+data User id email color = User id email color
+```
+
+I defined some convenient type aliases to represent the different types of operations on users:
+
+```hs
+type NewUser color = User () (Maybe String) color
+type ReadUser color = User Int (Maybe String) color
+type UpdateUser color = User Int (Maybe (Maybe String)) (Maybe color)
+```
+
+A `NewUser` does not have an ID associated, and may have an email address. When reading a user, I expect a definite ID and possibly an email address. Finally, 
+when updating a user, I expect a definite ID and possible updates to their email and favorite color. 
+
+The `id` and `email` types are pretty straightforward, and solely determined by the operation performed. The `color` type, however, is special. Its type will depend on the role of the caller, and
+can't be set in the aliases above.
+
+To solve the problem of determining the `color` field's type, I start by defining a class, `Secret`, with three parameters. The first two, 
+`rle` and `field`, determine the type of the third  (`result`), via functional dependency:
+
+```hs
+class Secret rle field result | rle field -> result
+```
+
+I then define instances which determine the result type of reading a given 
+field as a given role. For `Admin` roles, reading the `Color` field results in a `String`, but for
+ the `Ordinary` role, reading any `Secret` field results in `()`:
+
+```hs
+instance Secret Admin Color String
+instance Secret Ordinary a ()
+```
+
+Next, I define three functions that use the `Secret` constraint on the `Color` field to determine 
+what types are expected when creating, reading, and updating a user. Notice the `rle` argument (representing the role of the caller), 
+which when combined with the `Color` constraint, will determine the type of the `Color` field:
+
+```hs
+readUser :: (Secret rle Color color) => rle -> Int -> IO (Maybe (ReadUser color))
+updateUser :: (Secret rle Color color) => rle -> UpdateUser color -> IO (Maybe (ReadUser color))
+newUser :: (Secret rle Color color) => rle -> color -> Maybe String -> IO (NewUser color)
+```
+
+This completes the definition of the `User` data type and operations using it.
+
+In the `Main` module, I added some code to demonstrate the use of these functions 
+(see the "/example" endpoint at the end). Of course, none of this is expected to run, but is there to demonstrate the types.
+
+First, when an `Admin` role creates a user, they can specify a favorite color:
+
+```hs
+      _ <- liftIO $ newUser Admin "green" (Just "justin@example.com")
+```
+
+However, an `Ordinary` role must specify `()` for the favorite color. 
+In fact, if the `Ordinary` role tries to specify a favorite color, a compile error occurs:
+
+```hs
+      _ <- liftIO $ newUser Ordinary () (Just "justin@example.com")
+      -- Below won't compile because "Ordinary" can't specify a favorite color
+      -- _ <- liftIO $ newUser Ordinary "green" (Just "justin@example.com")
+```
+
+Reading a user follows a similar pattern. I used type annotations to show the result types of the
+favorite color field. When an `Admin` role reads a user, the field is a `String`. But when an `Ordinary` role 
+reads a user, the field is `()`. Again, a compile error occurs when the `Ordinary` role tries to assert that
+the field is a string:
+
+```hs
+      _ :: String <- liftIO (readUser Admin 1 >>= \x -> (return $ getColor x))
+      _ :: () <- liftIO (readUser Ordinary 1 >>= \x -> (return $ getColor x))
+      -- Below fails to compile because "Ordinary" role can't read favorite color
+      -- _ :: String <- liftIO (readUser Ordinary 1 >>= \x -> (return $ getColor x))
+```
+
+Finally, for completeness, similar rules apply when trying to update the `color` field:
+
+```hs
+      _ :: String <- liftIO (updateUser Admin (User 1 Nothing (Just "blue")) >>= \x -> (return $ getColor x))
+      _ :: () <- liftIO (updateUser Ordinary (User 1 Nothing (Just ())) >>= \x -> (return $ getColor x))
+      -- Below fails to compile because "Ordinary" role can't update favorite color
+      -- _ :: String <- liftIO (updateUser Ordinary (User 1 Nothing (Just "xxx")) >>= \x -> (return $ getColor x))
+```
